@@ -4,9 +4,18 @@
 
 Installed MAME 0.276 with the stock `macse` driver and the user-supplied supporting ADB/modem ROM staged outside this repository. The SE boots the supplied 400K HD20 Startup floppy and eventually reaches Finder. The long delay is normal for this emulated setup.
 
-## Limitation
+## Current implementation stage
 
-Stock MAME models the Macintosh IWM and physical floppy path but does not expose a native HD20/DCD endpoint. Therefore stock MAME can validate the guest floppy and baseline ROM behavior, but cannot yet test the PiStorm response packet.
+The source tree now contains an uncommitted trace/injection harness:
+
+- optional IWM data-write observer;
+- optional IWM data-read observer with 68K PC logging;
+- optional data-read override with an explicit validity callback;
+- separate `macsehd20` machine registration;
+- captured-command trigger for `AA 00 00 00 00 00 FC 00`;
+- first synthetic 539-byte response variant using 7-for-8 encoding.
+
+The harness does not alter stock `macse`. The patch is preserved at [`../mame/macsehd20-instrumentation.patch`](../mame/macsehd20-instrumentation.patch). It has not yet been compiled because this host lacks MAME's SDL2, ALSA, fontconfig, and Qt development dependencies.
 
 ## Required temporary harness
 

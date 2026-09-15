@@ -1,0 +1,195 @@
+diff --git a/src/devices/machine/iwm.cpp b/src/devices/machine/iwm.cpp
+index c7daaf84..689636b4 100644
+--- a/src/devices/machine/iwm.cpp
++++ b/src/devices/machine/iwm.cpp
+@@ -122,7 +122,15 @@ uint8_t iwm_device::read(offs_t offset)
+ 		control(offset, 0x00);
+ 
+ 	switch(m_control & 0xc0) {
+-	case 0x00: return m_active ? m_data : 0xff;
++	case 0x00:
++	{
++		u8 result = m_active ? m_data : 0xff;
++		if(m_active)
++			m_data_r_observer(offset, result);
++		if(m_active && m_data_r_valid(offset))
++			result = m_data_r(offset);
++		return result;
++	}
+ 	case 0x40: return (m_status & 0x7f) | ((!m_floppy || m_floppy->wpt_r()) ? 0x80 : 0x00);
+ 	case 0x80: return m_whd;
+ 	case 0xc0: return 0xff;
+@@ -279,6 +287,7 @@ void iwm_device::mode_w(u8 data)
+ void iwm_device::data_w(u8 data)
+ {
+ 	m_data = data;
++	m_data_w(data);
+ 	if(is_sync() && m_rw == MODE_WRITE)
+ 		m_wsh = data;
+ 	if(m_mode & 0x01)
+diff --git a/src/devices/machine/iwm.h b/src/devices/machine/iwm.h
+index ee4d90cc..39f7520b 100644
+--- a/src/devices/machine/iwm.h
++++ b/src/devices/machine/iwm.h
+@@ -34,6 +34,12 @@ public:
+ 
+ 	virtual void sync() override;
+ 
++	// Optional data-register hooks for experimental devices such as HD20.
++	auto data_r_cb() { return m_data_r.bind(); }
++	auto data_r_valid_cb() { return m_data_r_valid.bind(); }
++	auto data_r_observer_cb() { return m_data_r_observer.bind(); }
++	auto data_w_cb() { return m_data_w.bind(); }
++
+ protected:
+ 	virtual void device_start() override ATTR_COLD;
+ 	virtual void device_reset() override ATTR_COLD;
+@@ -67,6 +73,10 @@ private:
+ 	u8 m_rsh, m_wsh;
+ 	u8 m_devsel;
+ 	bool m_q3_clock_active;
++	devcb_read8 m_data_r;
++	devcb_read8 m_data_r_valid;
++	devcb_write8 m_data_r_observer;
++	devcb_write8 m_data_w;
+ 
+ 	void control(int offset, u8 data);
+ 	u64 time_to_cycles(const attotime &tm) const;
+diff --git a/src/mame/apple/mac128.cpp b/src/mame/apple/mac128.cpp
+index 03aa24c5..ccd419ef 100644
+--- a/src/mame/apple/mac128.cpp
++++ b/src/mame/apple/mac128.cpp
+@@ -194,6 +194,7 @@ public:
+ 	void mac512k(machine_config &config) ATTR_COLD;
+ 	void macplus(machine_config &config) ATTR_COLD;
+ 	void macse(machine_config &config) ATTR_COLD;
++	void macsehd20(machine_config &config) ATTR_COLD;
+ 	void macsefd(machine_config &config) ATTR_COLD;
+ 	void macclasc(machine_config &config) ATTR_COLD;
+ 
+@@ -247,6 +248,10 @@ private:
+ 	void scsi_w(offs_t offset, u16 data, u16 mem_mask = ~0);
+ 	u16 macse_scsi_r(offs_t offset, u16 mem_mask = ~0);
+ 	void macse_scsi_w(offs_t offset, u16 data, u16 mem_mask = ~0);
++	void hd20_iwm_data_w(u8 data);
++	void hd20_iwm_data_observe(offs_t offset, u8 data);
++	u8 hd20_iwm_data_valid(offs_t offset);
++	u8 hd20_iwm_data_override(offs_t offset);
+ 	void scsi_irq_w(int state);
+ 	void scsi_drq_w(int state);
+ 	void scsi_berr_w(u8 data);
+@@ -305,6 +310,11 @@ private:
+ 	bool m_drive_select;
+ 	u16 *m_ram_ptr, *m_rom_ptr;
+ 	u32 m_ram_mask, m_ram_size;
++	u8 m_hd20_command[8]{};
++	u8 m_hd20_command_length = 0;
++	u32 m_hd20_data_reads = 0, m_hd20_data_writes = 0;
++	u8 m_hd20_response[620]{};
++	u16 m_hd20_response_length = 0, m_hd20_response_index = 0;
+ };
+ 
+ void mac128_state::machine_start()
+@@ -760,6 +770,78 @@ void mac128_state::mac_iwm_w(offs_t offset, u16 data, u16 mem_mask)
+ 		m_iwm->write((offset >> 8) & 0xf, data>>8);
+ }
+ 
++void mac128_state::hd20_iwm_data_w(u8 data)
++{
++	if (m_hd20_command_length < sizeof(m_hd20_command))
++		m_hd20_command[m_hd20_command_length++] = data;
++	else
++	{
++		for (unsigned i = 1; i < sizeof(m_hd20_command); i++)
++			m_hd20_command[i - 1] = m_hd20_command[i];
++		m_hd20_command[sizeof(m_hd20_command) - 1] = data;
++	}
++
++	m_hd20_data_writes++;
++	logerror("[HD20-MAME] IWM data write %02x pc=%06x window=%u\n",
++		data, m_maincpu->pc(), m_hd20_command_length);
++
++	if (m_hd20_command_length == sizeof(m_hd20_command) &&
++		m_hd20_command[0] == 0xaa && m_hd20_command[1] == 0x00 &&
++		m_hd20_command[2] == 0x00 && m_hd20_command[3] == 0x00 &&
++		m_hd20_command[4] == 0x00 && m_hd20_command[5] == 0x00 &&
++		m_hd20_command[6] == 0xfc && m_hd20_command[7] == 0x00)
++	{
++		logerror("[HD20-MAME] captured native block-0 command pc=%06x\n", m_maincpu->pc());
++		u8 logical[539]{};
++		logical[0] = 0x80;
++		logical[1] = 0x00;
++		for (unsigned i = 0; i < 538; i++)
++			logical[538] = u8(logical[538] + logical[i]);
++		logical[538] = u8(0 - logical[538]);
++		m_hd20_response[0] = 0xaa;
++		m_hd20_response[1] = 0xaa;
++		unsigned out = 2;
++		for (unsigned i = 0; i < sizeof(logical); i += 7)
++		{
++			u8 low = 0;
++			for (unsigned j = 0; j < 7 && i + j < sizeof(logical); j++)
++			{
++				m_hd20_response[out++] = u8(0x80 | (logical[i + j] >> 1));
++				low |= u8((logical[i + j] & 1) << j);
++			}
++			m_hd20_response[out++] = u8(0x80 | low);
++		}
++		m_hd20_response[out++] = 0x00;
++		m_hd20_response_length = out;
++		m_hd20_response_index = 0;
++		logerror("[HD20-MAME] synthetic response queued length=%u checksum=%02x\n",
++			m_hd20_response_length, logical[538]);
++		m_hd20_command_length = 0;
++	}
++}
++
++void mac128_state::hd20_iwm_data_observe(offs_t offset, u8 data)
++{
++	m_hd20_data_reads++;
++	logerror("[HD20-MAME] IWM data read %02x pc=%06x count=%u\n",
++		data, m_maincpu->pc(), m_hd20_data_reads);
++}
++
++u8 mac128_state::hd20_iwm_data_valid(offs_t offset)
++{
++	return m_hd20_response_index < m_hd20_response_length;
++}
++
++u8 mac128_state::hd20_iwm_data_override(offs_t offset)
++{
++	if (m_hd20_response_index >= m_hd20_response_length)
++		return 0xff;
++	const u8 value = m_hd20_response[m_hd20_response_index++];
++	if (m_hd20_response_index == m_hd20_response_length)
++		logerror("[HD20-MAME] response FIFO exhausted pc=%06x\n", m_maincpu->pc());
++	return value;
++}
++
+ void mac128_state::mac_via_irq(int state)
+ {
+ 	/* interrupt the 68k (level 1) */
+@@ -1370,6 +1452,16 @@ void mac128_state::macse(machine_config &config)
+ 	subdevice<software_list_device>("cd_list")->set_filter("MC68000,macse");
+ }
+ 
++void mac128_state::macsehd20(machine_config &config)
++{
++	macse(config);
++	auto &iwm = downcast<iwm_device &>(*m_iwm);
++	iwm.data_w_cb().set(FUNC(mac128_state::hd20_iwm_data_w));
++	iwm.data_r_observer_cb().set(FUNC(mac128_state::hd20_iwm_data_observe));
++	iwm.data_r_cb().set(FUNC(mac128_state::hd20_iwm_data_override));
++	iwm.data_r_valid_cb().set(FUNC(mac128_state::hd20_iwm_data_valid));
++}
++
+ void mac128_state::macsefd(machine_config &config)
+ {
+ 	macse(config);
+@@ -1642,5 +1734,6 @@ COMP( 1986, macplus,  0,       0,      macplus,  macplus, mac128_state, mac_driv
+ COMP( 1986, macplusj, macplus, 0,      macplus,  macplus, mac128_state, mac_driver_init,  "Apple Computer",    "Macintosh Plus (Japan)",  MACHINE_SUPPORTS_SAVE )
+ COMP( 1985, utrn1024, macplus, 0,      macplus,  macplus, mac128_state, mac_driver_init,  "bootleg (Unitron)", "Unitron 1024",  MACHINE_SUPPORTS_SAVE )
+ COMP( 1987, macse,    0,       0,      macse,    macadb, mac128_state,  mac_driver_init,  "Apple Computer",   "Macintosh SE",  MACHINE_SUPPORTS_SAVE )
++COMP( 1987, macsehd20,macse,  0,      macsehd20,macadb, mac128_state,  mac_driver_init,  "Apple Computer",   "Macintosh SE (HD20 instrumentation)", MACHINE_SUPPORTS_SAVE )
+ COMP( 1989, macsefd,  0,       0,      macsefd,  macadb, mac128_state,  mac_driver_init,  "Apple Computer",   "Macintosh SE (FDHD)",  MACHINE_SUPPORTS_SAVE )
+ COMP( 1990, macclasc, 0,       0,      macclasc, macadb, mac128_state,  mac_driver_init,  "Apple Computer",   "Macintosh Classic",  MACHINE_SUPPORTS_SAVE )
