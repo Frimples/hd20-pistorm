@@ -1,8 +1,21 @@
 diff --git a/src/devices/machine/iwm.cpp b/src/devices/machine/iwm.cpp
-index c7daaf84..689636b4 100644
+index c7daaf84..0e7e8e46 100644
 --- a/src/devices/machine/iwm.cpp
 +++ b/src/devices/machine/iwm.cpp
-@@ -122,7 +122,15 @@ uint8_t iwm_device::read(offs_t offset)
+@@ -24,7 +24,11 @@ DEFINE_DEVICE_TYPE(IWM, iwm_device, "iwm", "Apple IWM floppy controller")
+ iwm_device::iwm_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock, uint32_t q3_clock) :
+ 	applefdintf_device(mconfig, IWM, tag, owner, clock),
+ 	m_floppy(nullptr),
+-	m_q3_clock(q3_clock)
++	m_q3_clock(q3_clock),
++	m_data_r(*this, 0),
++	m_data_r_valid(*this, 0),
++	m_data_r_observer(*this),
++	m_data_w(*this)
+ {
+ }
+ 
+@@ -122,7 +126,15 @@ uint8_t iwm_device::read(offs_t offset)
  		control(offset, 0x00);
  
  	switch(m_control & 0xc0) {
@@ -19,7 +32,7 @@ index c7daaf84..689636b4 100644
  	case 0x40: return (m_status & 0x7f) | ((!m_floppy || m_floppy->wpt_r()) ? 0x80 : 0x00);
  	case 0x80: return m_whd;
  	case 0xc0: return 0xff;
-@@ -279,6 +287,7 @@ void iwm_device::mode_w(u8 data)
+@@ -279,6 +291,7 @@ void iwm_device::mode_w(u8 data)
  void iwm_device::data_w(u8 data)
  {
  	m_data = data;
@@ -56,7 +69,7 @@ index ee4d90cc..39f7520b 100644
  	void control(int offset, u8 data);
  	u64 time_to_cycles(const attotime &tm) const;
 diff --git a/src/mame/apple/mac128.cpp b/src/mame/apple/mac128.cpp
-index 03aa24c5..ccd419ef 100644
+index 03aa24c5..4fe4750c 100644
 --- a/src/mame/apple/mac128.cpp
 +++ b/src/mame/apple/mac128.cpp
 @@ -194,6 +194,7 @@ public:
@@ -186,7 +199,20 @@ index 03aa24c5..ccd419ef 100644
  void mac128_state::macsefd(machine_config &config)
  {
  	macse(config);
-@@ -1642,5 +1734,6 @@ COMP( 1986, macplus,  0,       0,      macplus,  macplus, mac128_state, mac_driv
+@@ -1617,6 +1709,12 @@ ROM_START( macse )
+ 	// GLU HAL (mask PAL)
+ ROM_END
+ 
++ROM_START( macsehd20 )
++	ROM_REGION16_BE(0x100000, "bootrom", 0)
++	ROM_LOAD16_WORD( "macse.rom",  0x00000, 0x40000, CRC(0f7ff80c) SHA1(58532b7d0d49659fd5228ac334a1b094f0241968))
++	// Instrumentation machine; ROM is intentionally identical to macse.
++ROM_END
++
+ ROM_START( macsefd )
+ 	ROM_REGION16_BE(0x100000, "bootrom", 0)
+ 	ROM_LOAD( "be06e171.rom", 0x000000, 0x040000, CRC(f530cb10) SHA1(d3670a90273d12e53d86d1228c068cb660b8c9d1) )
+@@ -1642,5 +1740,6 @@ COMP( 1986, macplus,  0,       0,      macplus,  macplus, mac128_state, mac_driv
  COMP( 1986, macplusj, macplus, 0,      macplus,  macplus, mac128_state, mac_driver_init,  "Apple Computer",    "Macintosh Plus (Japan)",  MACHINE_SUPPORTS_SAVE )
  COMP( 1985, utrn1024, macplus, 0,      macplus,  macplus, mac128_state, mac_driver_init,  "bootleg (Unitron)", "Unitron 1024",  MACHINE_SUPPORTS_SAVE )
  COMP( 1987, macse,    0,       0,      macse,    macadb, mac128_state,  mac_driver_init,  "Apple Computer",   "Macintosh SE",  MACHINE_SUPPORTS_SAVE )
