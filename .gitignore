@@ -1,0 +1,21 @@
+# Build outputs and local artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+emulator_*
+build_*.log
+*.dsk
+*.img
+*.zip
+*.rom
+*.bin
+*.log
+
+# Local/private material
+.env
+*.pem
+*.key
+credentials*
+secrets*
