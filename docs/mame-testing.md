@@ -15,7 +15,7 @@ The source tree now contains an uncommitted trace/injection harness:
 - captured-command trigger for `AA 00 00 00 00 00 FC 00`;
 - first synthetic 539-byte response variant using 7-for-8 encoding.
 
-The harness does not alter stock `macse`. The patch is preserved at [`../mame/macsehd20-instrumentation.patch`](../mame/macsehd20-instrumentation.patch). The IWM and Macintosh driver translation units now pass a direct C++20 syntax-only compile probe. Full MAME linking remains blocked by missing OSD development libraries.
+The harness does not alter stock `macse`. The patch is preserved at [`../mame/macsehd20-instrumentation.patch`](../mame/macsehd20-instrumentation.patch). The modified `iwm.cpp` and `mac128.cpp` both pass direct C++20 syntax-only compilation. Full MAME is being built with `USE_QTDEBUG=0`; linking remains dependent on the available OSD libraries.
 
 ## Required temporary harness
 
